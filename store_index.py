@@ -1,40 +1,41 @@
-from src.helper import load_pdf_file, text_split, download_google_genai_embeddings
-from pinecone.grpc import PineconeGRPC as Pinecone
-from pinecone import ServerlessSpec
-from langchain_pinecone import PineconeVectorStore
+from src.helper import load_pdf_file, text_split, download_huggingface_embeddings
+from langchain_community.vectorstores import Pinecone
+from pinecone import Pinecone as PineconeClient, ServerlessSpec
 from dotenv import load_dotenv
 import os
 
-
 load_dotenv()
 
-PINECONE_API_KEY=os.environ.get('PINECONE_API_KEY')
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
 
+INDEX_NAME = "mental-health-chatbot"
 
-extracted_data=load_pdf_file(data='Data/')
-text_chunks=text_split(extracted_data)
-embeddings = download_google_genai_embeddings()
+# Load documents
+documents = load_pdf_file(data="Data/")
+text_chunks = text_split(documents)
 
+# Embeddings (384 DIM)
+embeddings = download_huggingface_embeddings()
 
-pc = Pinecone(api_key=PINECONE_API_KEY)
+pc = PineconeClient(api_key=PINECONE_API_KEY)
 
-index_name = "medicalbot"
-
-
+# 🚨 ALWAYS CREATE WITH 384
 pc.create_index(
-    name=index_name,
-    dimension=768, 
-    metric="cosine", 
+    name=INDEX_NAME,
+    dimension=384,
+    metric="cosine",
     spec=ServerlessSpec(
-        cloud="aws", 
+        cloud="aws",
         region="us-east-1"
-    ) 
-) 
-
-# Embed each chunk and upsert the embeddings into your Pinecone index.
-docsearch = PineconeVectorStore.from_documents(
-    documents=text_chunks,
-    index_name=index_name,
-    embedding=embeddings, 
+    )
 )
+
+# Upload vectors
+Pinecone.from_documents(
+    documents=text_chunks,
+    embedding=embeddings,
+    index_name=INDEX_NAME
+)
+
+print("✅ Pinecone index created with 384 dims and documents uploaded")

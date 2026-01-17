@@ -1,13 +1,19 @@
-sentence-transformers==2.2.2
-langchain
-flask
-pypdf
+streamlit
+
+# LangChain (Groq-compatible)
+langchain==0.2.16
+langchain-core==0.2.38
+langchain-community==0.2.16
+langchain-groq==0.1.5
+
+# Local embeddings (no API quota)
+sentence-transformers>=3.0.0
+transformers>=4.38.0
+huggingface-hub>=0.33.4
+
+# Pinecone (NO langchain-pinecone)
+pinecone[grpc]==5.4.2
+
+# Utilities
 python-dotenv
-pinecone[grpc]
-langchain-pinecone
-langchain_community
-# langchain_openai
-langchain-google-genai
-sentence-transformers
-langchain_experimental
--e .
+pypdf

@@ -1,67 +1,114 @@
-from flask import Flask, render_template, jsonify, request
-from src.helper import download_google_genai_embeddings
-from langchain_pinecone import PineconeVectorStore
-from langchain_google_genai import ChatGoogleGenerativeAI
+import streamlit as st
+import os
+from dotenv import load_dotenv
+
+from src.helper import download_huggingface_embeddings
+from src.prompt import system_prompt
+
+from langchain_community.vectorstores import Pinecone
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
-from dotenv import load_dotenv
-from src.prompt import *
-import os
+from langchain_groq import ChatGroq
 
-app = Flask(__name__)
 
+# -----------------------------------
+# Page Config
+# -----------------------------------
+st.set_page_config(
+    page_title="🩺 Medical Chatbot - GenAI",
+    page_icon="🧠",
+    layout="centered"
+)
+
+st.title("🩺 Medical Chatbot (GenAI)")
+st.warning(
+    "⚠️ This chatbot is for **educational purposes only** and does NOT provide medical advice. "
+    "Please consult a qualified healthcare professional for medical concerns."
+)
+
+# -----------------------------------
+# Load Environment Variables
+# -----------------------------------
 load_dotenv()
 
-PINECONE_API_KEY=os.environ.get('PINECONE_API_KEY')
-GOOGLE_API_KEY=os.environ.get('GOOGLE_API_KEY')
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACEHUB_ACCESS_TOKEN")
+
+if not PINECONE_API_KEY or not HUGGINGFACE_API_KEY:
+    st.error("Missing API keys. Please set them in Streamlit Secrets.")
+    st.stop()
 
 os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
-os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
-
-embeddings = download_google_genai_embeddings()
 
 
-index_name = "medicalbot"
+# -----------------------------------
+# Cache Heavy Resources
+# -----------------------------------
+@st.cache_resource
+def load_rag_pipeline():
+    # Embeddings
+    embeddings = download_huggingface_embeddings()
 
-# Embed each chunk and upsert the embeddings into your Pinecone index.
-docsearch = PineconeVectorStore.from_existing_index(
-    index_name=index_name,
-    embedding=embeddings
-)
+    # Pinecone Vector Store
+    index_name = "mental-health-chatbot"
+    vectorstore = Pinecone.from_existing_index(
+        index_name=index_name,
+        embedding=embeddings
+    )
 
-retriever = docsearch.as_retriever(search_type="similarity", search_kwargs={"k":3})
+    retriever = vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 1}
+    )
 
+    llm = ChatGroq(
+        model="openai/gpt-oss-20b",
+        api_key=os.getenv("GROQ_API_KEY"),
+        temperature=0.2,
+        # max_output_tokens: 200
+    )
 
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash",temperature=0.4, max_tokens=500)
-prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", system_prompt),
-        ("human", "{input}"),
-    ]
-)
+    # Prompt
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("human", "{input}"),
+        ]
+    )
 
-question_answer_chain = create_stuff_documents_chain(llm, prompt)
-rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+    question_answer_chain = create_stuff_documents_chain(llm, prompt)
+    rag_chain = create_retrieval_chain(retriever, question_answer_chain)
 
-
-@app.route("/")
-def index():
-    return render_template('chat.html')
-
-
-@app.route("/get", methods=["GET", "POST"])
-def chat():
-    
-    msg = request.form["msg"]
-    input = msg
-    print(input)
-    response = rag_chain.invoke({"input": msg})
-    print("Response : ", response["answer"])
-    return str(response["answer"])
+    return rag_chain
 
 
+rag_chain = load_rag_pipeline()
 
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port= 8080, debug= True)
+# -----------------------------------
+# Chat UI
+# -----------------------------------
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+user_input = st.chat_input("Ask a medical or mental health related question...")
+
+if user_input:
+    # Save user message
+    st.session_state.chat_history.append(("user", user_input))
+
+    with st.spinner("Thinking... 🤔"):
+        response = rag_chain.invoke({"input": user_input})
+        answer = response["answer"]
+
+    # Save bot response
+    st.session_state.chat_history.append(("assistant", answer))
+
+
+# -----------------------------------
+# Display Chat History
+# -----------------------------------
+for role, message in st.session_state.chat_history:
+    with st.chat_message(role):
+        st.markdown(message)
